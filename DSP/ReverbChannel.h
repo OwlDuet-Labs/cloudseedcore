@@ -77,9 +77,30 @@ namespace Cloudseed
 		float crossSeed;
 		ChannelLR channelLr;
 
+		// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-datamodel-01>
+		// Phase 2: Crossfeed buffer coordination infrastructure
+		// These pointers reference buffers managed by ReverbController for buffer sharing
+		// Phase 3 will populate these during processing for actual crossfeed mixing
+
+		// Input crossfeed buffers (from opposite channel's previous processing)
+		const float* crossfeedEarlyInputBuffer_;  // Early reflections from opposite channel
+		const float* crossfeedLateInputBuffer_;   // Late diffusion feedback from opposite channel
+
+		// Enable flags for independent early/late crossfeed control
+		bool earlyCrossfeedEnabled_;
+		bool lateCrossfeedEnabled_;
+
+		// Buffer size for validation
+		int crossfeedBufferSize_;
+
 	public:
 
-		ReverbChannel(int samplerate, ChannelLR leftOrRight)
+		ReverbChannel(int samplerate, ChannelLR leftOrRight) :
+			crossfeedEarlyInputBuffer_(nullptr),
+			crossfeedLateInputBuffer_(nullptr),
+			earlyCrossfeedEnabled_(false),
+			lateCrossfeedEnabled_(false),
+			crossfeedBufferSize_(0)
 		{
 			this->channelLr = leftOrRight;
 			crossSeed = 0.0;
@@ -309,8 +330,49 @@ namespace Cloudseed
 				postDiffusionSeed = (int)scaledValue;
 				UpdatePostDiffusion();
 				break;
+
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-datamodel-01>
+			// Phase 2: Crossfeed parameter handling (infrastructure only)
+			case Parameter::CrossfeedEnabled:
+				// Handled by ReverbController's SetCrossfeedMode
+				break;
+			case Parameter::EarlyCrossfeedAmount:
+			case Parameter::LateCrossfeedAmount:
+			case Parameter::CrossfeedDelay:
+			case Parameter::CrossfeedDamping:
+				// Phase 3 will use these for actual DSP mixing
+				// Phase 2: Just store in paramsScaled array
+				break;
 			}
 		}
+
+		// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-datamodel-01>
+		// Phase 2: Crossfeed buffer coordination methods (infrastructure only)
+		// These methods allow ReverbController to set up buffer sharing between L/R channels
+
+		// Set crossfeed input buffers (from opposite channel)
+		// Phase 3 will read from these buffers during processing for crossfeed mixing
+		void SetCrossfeedBuffers(const float* earlyInput, const float* lateInput, int bufferSize)
+		{
+			crossfeedEarlyInputBuffer_ = earlyInput;
+			crossfeedLateInputBuffer_ = lateInput;
+			crossfeedBufferSize_ = bufferSize;
+		}
+
+		// Enable/disable early and late crossfeed independently
+		void SetEarlyCrossfeedEnabled(bool enabled)
+		{
+			earlyCrossfeedEnabled_ = enabled;
+		}
+
+		void SetLateCrossfeedEnabled(bool enabled)
+		{
+			lateCrossfeedEnabled_ = enabled;
+		}
+
+		// Get enable states for validation
+		bool GetEarlyCrossfeedEnabled() const { return earlyCrossfeedEnabled_; }
+		bool GetLateCrossfeedEnabled() const { return lateCrossfeedEnabled_; }
 
 		void Process(float* input, float* output, int bufSize)
 		{
@@ -340,14 +402,31 @@ namespace Cloudseed
 				multitap.Process(tempBuffer, tempBuffer, bufSize);
 			if (diffuserEnabled)
 				diffuser.Process(tempBuffer, tempBuffer, bufSize);
-			
+
 			Utils::Copy(earlyOutBuffer, tempBuffer, bufSize);
+
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-datamodel-01>
+			// Phase 2: Placeholder for early crossfeed mixing
+			// Phase 3 will implement actual early reflection crossfeed here
+			// if (earlyCrossfeedEnabled_ && crossfeedEarlyInputBuffer_ != nullptr) {
+			//     // Mix early reflections from opposite channel
+			//     // Apply EarlyCrossfeedAmount parameter
+			// }
+
 			Utils::ZeroBuffer(lineSumBuffer, bufSize);
 			for (int i = 0; i < lineCount; i++)
 			{
 				lines[i].Process(tempBuffer, lineOutBuffer, bufSize);
 				Utils::Mix(lineSumBuffer, lineOutBuffer, 1.0f, bufSize);
 			}
+
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-datamodel-01>
+			// Phase 2: Placeholder for late crossfeed feedback injection
+			// Phase 3 will implement feedback loop here BEFORE late diffusion
+			// if (lateCrossfeedEnabled_ && crossfeedLateInputBuffer_ != nullptr) {
+			//     // Inject damped feedback from opposite channel
+			//     // Apply LateCrossfeedAmount × CrossfeedDamping
+			// }
 
 			auto perLineGain = GetPerLineGain();
 			Utils::Gain(lineSumBuffer, perLineGain, bufSize);
@@ -369,6 +448,12 @@ namespace Cloudseed
 			diffuser.ClearBuffers();
 			for (int i = 0; i < TotalLineCount; i++)
 				lines[i].ClearBuffers();
+
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-datamodel-01>
+			// Phase 2: Clear crossfeed buffer references
+			crossfeedEarlyInputBuffer_ = nullptr;
+			crossfeedLateInputBuffer_ = nullptr;
+			crossfeedBufferSize_ = 0;
 		}
 
 

@@ -82,7 +82,16 @@ namespace Cloudseed
         const int SeedDelay = 43;
         const int SeedPostDiffusion = 44;
 
-        const int COUNT = 45;
+        // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
+        // Crossfeed extension parameters (5 new parameters)
+        // Phase 2: Infrastructure only - defaults maintain baseline CloudSeed behavior
+        const int CrossfeedEnabled = 45;         // 0.0=off, 1.0=on (mode flag)
+        const int EarlyCrossfeedAmount = 46;     // 0.0 to 1.0 (early reflection crossfeed)
+        const int LateCrossfeedAmount = 47;      // 0.0 to 1.0 (late diffusion crossfeed)
+        const int CrossfeedDelay = 48;           // 0.0 to 10.0 (ms, optional delay before crossfeed injection)
+        const int CrossfeedDamping = 49;         // 0.7 to 0.95 (late feedback stability)
+
+        const int COUNT = 50;  // Updated from 45 to 50
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -172,6 +181,19 @@ namespace Cloudseed
             return -20 + val * 20;
         case Parameter::EqHighGain:
             return -20 + val * 20;
+
+        // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
+        // Crossfeed parameter scaling
+        case Parameter::CrossfeedEnabled:
+            return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on
+        case Parameter::EarlyCrossfeedAmount:
+            return val;  // 0.0 to 1.0, default 0.5 (50%)
+        case Parameter::LateCrossfeedAmount:
+            return val;  // 0.0 to 1.0, default 0.3 (30%)
+        case Parameter::CrossfeedDelay:
+            return val * 10.0;  // 0.0 to 10.0 ms
+        case Parameter::CrossfeedDamping:
+            return 0.7 + val * 0.25;  // 0.7 to 0.95, default 0.85
         }
         return 0;
     }
@@ -275,6 +297,25 @@ namespace Cloudseed
         case Parameter::EqLowGain:
         case Parameter::EqHighGain:
             snprintf(buffer, MAX_STR_SIZE, "%.1f dB", s);
+            break;
+
+        // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
+        // Crossfeed parameter formatting
+        case Parameter::CrossfeedEnabled:
+            if (s == 1)
+                strcpy_s(buffer, MAX_STR_SIZE, "ENABLED");
+            else
+                strcpy_s(buffer, MAX_STR_SIZE, "DISABLED");
+            break;
+        case Parameter::EarlyCrossfeedAmount:
+        case Parameter::LateCrossfeedAmount:
+            snprintf(buffer, MAX_STR_SIZE, "%d%%", (int)(s * 100));
+            break;
+        case Parameter::CrossfeedDelay:
+            snprintf(buffer, MAX_STR_SIZE, "%.1f ms", s);
+            break;
+        case Parameter::CrossfeedDamping:
+            snprintf(buffer, MAX_STR_SIZE, "%.2f", s);
             break;
 
         default:
