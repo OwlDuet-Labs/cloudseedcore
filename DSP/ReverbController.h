@@ -194,17 +194,54 @@ namespace Cloudseed
 			}
 
 			// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-impl-02>
-			// Phase 2: Process L/R channels (baseline behavior)
-			// Phase 3 will implement crossfeed buffer coordination here based on crossfeedMode_
-			channelL.Process(leftChannelIn, outL, bufSize);
-			channelR.Process(rightChannelIn, outR, bufSize);
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algo-03>
+			// Phase 3: Crossfeed buffer coordination based on mode
 
-			// Phase 3 TODO: Add crossfeed buffer exchange when crossfeedMode_ != Disabled
-			// if (crossfeedMode_ != CrossfeedMode::Disabled) {
-			//     // Extract early/late outputs from channels
-			//     // Exchange buffers between L/R
-			//     // Apply crossfeed mixing based on mode
-			// }
+			if (crossfeedMode_ == CrossfeedMode::Disabled)
+			{
+				// Baseline mode: Independent L/R processing with no crossfeed
+				channelL.Process(leftChannelIn, outL, bufSize);
+				channelR.Process(rightChannelIn, outR, bufSize);
+			}
+			else
+			{
+				// Crossfeed mode: Set up buffer sharing before processing
+				// Configure which crossfeed stages are enabled based on mode
+				bool earlyEnabled = (crossfeedMode_ == CrossfeedMode::EarlyOnly ||
+				                     crossfeedMode_ == CrossfeedMode::Both);
+				bool lateEnabled = (crossfeedMode_ == CrossfeedMode::LateOnly ||
+				                    crossfeedMode_ == CrossfeedMode::Both);
+
+				channelL.SetEarlyCrossfeedEnabled(earlyEnabled);
+				channelL.SetLateCrossfeedEnabled(lateEnabled);
+				channelR.SetEarlyCrossfeedEnabled(earlyEnabled);
+				channelR.SetLateCrossfeedEnabled(lateEnabled);
+
+				// CRITICAL: Set up crossfeed input buffers BEFORE processing
+				// Each channel reads from the opposite channel's PREVIOUS block outputs
+				// This creates the 1-block delay inherent in the feedback loop
+				channelL.SetCrossfeedBuffers(
+					channelR.GetEarlyOutputBuffer(),  // L reads R's previous early output
+					channelR.GetLateOutputBuffer(),   // L reads R's previous late output (feedback)
+					bufSize
+				);
+				channelR.SetCrossfeedBuffers(
+					channelL.GetEarlyOutputBuffer(),  // R reads L's previous early output
+					channelL.GetLateOutputBuffer(),   // R reads L's previous late output (feedback)
+					bufSize
+				);
+
+				// Process channels with crossfeed enabled
+				// Each channel will:
+				// 1. Mix early reflections from opposite channel (early crossfeed)
+				// 2. Inject damped late feedback from opposite channel before late diffusion
+				// 3. Store early/late outputs for opposite channel's NEXT block
+				channelL.Process(leftChannelIn, outL, bufSize);
+				channelR.Process(rightChannelIn, outR, bufSize);
+
+				// Note: Buffer outputs are automatically stored in ReverbChannel::Process()
+				// for use in the next processing block (feedback loop continuity)
+			}
 		}
 	};
 }
