@@ -96,6 +96,12 @@ namespace Cloudseed
 		// Buffer size for validation
 		int crossfeedBufferSize_;
 
+		// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
+		// Phase 3: Frequency-dependent damping filters for late crossfeed stability
+		// Cascaded filter chain: HPF (40 Hz) → LPF (3 kHz) → scalar damping
+		Lp1 crossfeedLowpass_;   // Lowpass filter for frequency-dependent damping (3 kHz default)
+		Hp1 crossfeedHighpass_;  // Highpass filter for DC blocking (40 Hz default)
+
 	public:
 
 		ReverbChannel(int samplerate, ChannelLR leftOrRight) :
@@ -111,6 +117,12 @@ namespace Cloudseed
 			diffuser.SetInterpolationEnabled(true);
 			highPass.SetCutoffHz(20);
 			lowPass.SetCutoffHz(20000);
+
+			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
+			// Initialize crossfeed damping filters with default cutoffs
+			crossfeedHighpass_.SetCutoffHz(40);   // DC blocking (20-100 Hz range)
+			crossfeedLowpass_.SetCutoffHz(3000);  // Frequency-dependent damping (1000-8000 Hz range)
+
 			SetSamplerate(samplerate);
 		}
 
@@ -125,6 +137,11 @@ namespace Cloudseed
 			highPass.SetSamplerate(samplerate);
 			lowPass.SetSamplerate(samplerate);
 			diffuser.SetSamplerate(samplerate);
+
+			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
+			// Set sample rate for crossfeed damping filters
+			crossfeedHighpass_.SetSamplerate(samplerate);
+			crossfeedLowpass_.SetSamplerate(samplerate);
 
 			for (int i = 0; i < TotalLineCount; i++)
 				lines[i].SetSamplerate(samplerate);
@@ -345,6 +362,19 @@ namespace Cloudseed
 				// Phase 3 will use these for actual DSP mixing
 				// Phase 2: Just store in paramsScaled array
 				break;
+
+			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
+			// Phase 3: Frequency-dependent damping filter parameters
+			case Parameter::CrossfeedLowpassCutoff:
+				crossfeedLowpass_.SetCutoffHz(scaledValue);
+				break;
+			case Parameter::CrossfeedHighpassCutoff:
+				crossfeedHighpass_.SetCutoffHz(scaledValue);
+				break;
+			case Parameter::CrossfeedFilterEnabled:
+				// Filter enable state handled in process loop
+				// Just store in paramsScaled array
+				break;
 			}
 		}
 
@@ -434,25 +464,44 @@ namespace Cloudseed
 
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-01>
 			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algo-03>
-			// Phase 3: Late diffusion feedback crossfeed with damping for stability
+			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
+			// Phase 3: Late diffusion feedback crossfeed with FREQUENCY-DEPENDENT damping for stability
 			// CRITICAL: Inject feedback BEFORE late diffusion processing (not at output)
 			// This creates a true feedback loop where late diffusion processes the crossfeed energy
-			// Damping coefficient prevents runaway feedback (ensures loop gain < 1.0)
+			// V1.1: Cascaded filter chain prevents low-frequency feedback instability
 			if (lateCrossfeedEnabled_ && crossfeedLateInputBuffer_ != nullptr)
 			{
 				float lateAmount = paramsScaled[Parameter::LateCrossfeedAmount];
 				float damping = paramsScaled[Parameter::CrossfeedDamping];
+				bool filterEnabled = paramsScaled[Parameter::CrossfeedFilterEnabled] >= 0.5;
 
-				// Apply damping to prevent feedback instability
-				// Loop gain = lateAmount × damping must be < 1.0
-				// Example: 0.3 × 0.85 = 0.255 (stable)
-				float dampedGain = lateAmount * damping;
-
-				// Inject damped feedback from opposite channel's PREVIOUS block into late diffusion input
-				// This is NOT output mixing - it's feedback injection into the processing chain
-				for (int i = 0; i < bufSize; i++)
+				// V1.1: Apply frequency-dependent damping filter chain
+				// Topology: Raw Feedback → HPF (40 Hz) → LPF (3 kHz) → Scalar Damping → Inject
+				if (filterEnabled)
 				{
-					tempBuffer[i] += crossfeedLateInputBuffer_[i] * dampedGain;
+					// STEP 1: Read raw feedback from opposite channel's previous block
+					// STEP 2-3: Apply cascaded filters (HPF → LPF)
+					// STEP 4: Apply scalar damping (final gain staging)
+					// STEP 5: Inject into late diffusion input
+					for (int i = 0; i < bufSize; i++)
+					{
+						float raw = crossfeedLateInputBuffer_[i];
+						float hp = crossfeedHighpass_.Process(raw);      // DC blocking
+						float lp = crossfeedLowpass_.Process(hp);         // Frequency-dependent damping
+						float dampedFeedback = lateAmount * damping * lp; // Scalar gain staging
+						tempBuffer[i] += dampedFeedback;
+					}
+				}
+				else
+				{
+					// V1.0: Simple scalar damping (frequency-independent) - LEGACY MODE
+					// Loop gain = lateAmount × damping must be < 1.0
+					// Example: 0.3 × 0.85 = 0.255 (stable for short durations)
+					float dampedGain = lateAmount * damping;
+					for (int i = 0; i < bufSize; i++)
+					{
+						tempBuffer[i] += crossfeedLateInputBuffer_[i] * dampedGain;
+					}
 				}
 			}
 
@@ -498,6 +547,11 @@ namespace Cloudseed
 			// Phase 3: Clear output buffers to prevent stale data in feedback loop
 			Utils::ZeroBuffer(earlyOutputBuffer_, BUFFER_SIZE);
 			Utils::ZeroBuffer(lateOutputBuffer_, BUFFER_SIZE);
+
+			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
+			// Phase 3: Clear crossfeed damping filter state
+			crossfeedLowpass_.ClearBuffers();
+			crossfeedHighpass_.ClearBuffers();
 		}
 
 

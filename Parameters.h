@@ -83,14 +83,18 @@ namespace Cloudseed
         const int SeedPostDiffusion = 44;
 
         // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
-        // Crossfeed extension parameters (4 new parameters)
+        // Crossfeed extension parameters (7 new parameters)
         // Phase 2: Infrastructure only - defaults maintain baseline CloudSeed behavior
+        // Phase 3: Frequency-dependent damping filters (v1.1)
         const int CrossfeedEnabled = 45;         // 0.0=off, 1.0=on (mode flag)
         const int EarlyCrossfeedAmount = 46;     // 0.0 to 1.0 (early reflection crossfeed)
         const int LateCrossfeedAmount = 47;      // 0.0 to 1.0 (late diffusion crossfeed)
         const int CrossfeedDamping = 48;         // 0.7 to 0.95 (late feedback stability)
+        const int CrossfeedLowpassCutoff = 49;   // 1000-8000 Hz (frequency-dependent damping)
+        const int CrossfeedHighpassCutoff = 50;  // 20-100 Hz (DC blocking)
+        const int CrossfeedFilterEnabled = 51;   // 0.0=off, 1.0=on (enable filter chain)
 
-        const int COUNT = 49;  // Updated from 45 to 49 (4 crossfeed parameters)
+        const int COUNT = 52;  // Updated from 45 to 52 (7 crossfeed parameters)
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -191,6 +195,12 @@ namespace Cloudseed
             return val;  // 0.0 to 1.0, default 0.3 (30%)
         case Parameter::CrossfeedDamping:
             return 0.7 + val * 0.25;  // 0.7 to 0.95, default 0.85
+        case Parameter::CrossfeedLowpassCutoff:
+            return 1000 + val * 7000;  // 1000-8000 Hz, default 3000 Hz (val=0.286)
+        case Parameter::CrossfeedHighpassCutoff:
+            return 20 + val * 80;  // 20-100 Hz, default 40 Hz (val=0.25)
+        case Parameter::CrossfeedFilterEnabled:
+            return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default on)
         }
         return 0;
     }
@@ -299,6 +309,7 @@ namespace Cloudseed
         // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
         // Crossfeed parameter formatting
         case Parameter::CrossfeedEnabled:
+        case Parameter::CrossfeedFilterEnabled:
             if (s == 1)
                 strcpy_s(buffer, MAX_STR_SIZE, "ENABLED");
             else
@@ -310,6 +321,10 @@ namespace Cloudseed
             break;
         case Parameter::CrossfeedDamping:
             snprintf(buffer, MAX_STR_SIZE, "%.2f", s);
+            break;
+        case Parameter::CrossfeedLowpassCutoff:
+        case Parameter::CrossfeedHighpassCutoff:
+            snprintf(buffer, MAX_STR_SIZE, "%d Hz", (int)s);
             break;
 
         default:
