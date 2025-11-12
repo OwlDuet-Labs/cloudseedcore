@@ -341,7 +341,6 @@ namespace Cloudseed
 				break;
 			case Parameter::EarlyCrossfeedAmount:
 			case Parameter::LateCrossfeedAmount:
-			case Parameter::CrossfeedDelay:
 			case Parameter::CrossfeedDamping:
 				// Phase 3 will use these for actual DSP mixing
 				// Phase 2: Just store in paramsScaled array

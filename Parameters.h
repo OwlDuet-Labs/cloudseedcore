@@ -83,15 +83,14 @@ namespace Cloudseed
         const int SeedPostDiffusion = 44;
 
         // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
-        // Crossfeed extension parameters (5 new parameters)
+        // Crossfeed extension parameters (4 new parameters)
         // Phase 2: Infrastructure only - defaults maintain baseline CloudSeed behavior
         const int CrossfeedEnabled = 45;         // 0.0=off, 1.0=on (mode flag)
         const int EarlyCrossfeedAmount = 46;     // 0.0 to 1.0 (early reflection crossfeed)
         const int LateCrossfeedAmount = 47;      // 0.0 to 1.0 (late diffusion crossfeed)
-        const int CrossfeedDelay = 48;           // 0.0 to 10.0 (ms, optional delay before crossfeed injection)
-        const int CrossfeedDamping = 49;         // 0.7 to 0.95 (late feedback stability)
+        const int CrossfeedDamping = 48;         // 0.7 to 0.95 (late feedback stability)
 
-        const int COUNT = 50;  // Updated from 45 to 50
+        const int COUNT = 49;  // Updated from 45 to 49 (4 crossfeed parameters)
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -190,8 +189,6 @@ namespace Cloudseed
             return val;  // 0.0 to 1.0, default 0.5 (50%)
         case Parameter::LateCrossfeedAmount:
             return val;  // 0.0 to 1.0, default 0.3 (30%)
-        case Parameter::CrossfeedDelay:
-            return val * 10.0;  // 0.0 to 10.0 ms
         case Parameter::CrossfeedDamping:
             return 0.7 + val * 0.25;  // 0.7 to 0.95, default 0.85
         }
@@ -310,9 +307,6 @@ namespace Cloudseed
         case Parameter::EarlyCrossfeedAmount:
         case Parameter::LateCrossfeedAmount:
             snprintf(buffer, MAX_STR_SIZE, "%d%%", (int)(s * 100));
-            break;
-        case Parameter::CrossfeedDelay:
-            snprintf(buffer, MAX_STR_SIZE, "%.1f ms", s);
             break;
         case Parameter::CrossfeedDamping:
             snprintf(buffer, MAX_STR_SIZE, "%.2f", s);
