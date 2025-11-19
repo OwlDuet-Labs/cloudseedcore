@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "RandomBuffer.h"
 #include "Lp1.h"
 #include "Hp1.h"
+#include "Hp2.h"
 #include "DelayLine.h"
 #include "AllpassDiffuser.h"
 #include "GainStaging.h"
@@ -100,9 +101,9 @@ namespace Cloudseed
 
 		// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
 		// Phase 3: Frequency-dependent damping filters for late crossfeed stability
-		// Cascaded filter chain: HPF (40 Hz) → Decorr → LPF (3 kHz) → Gain → scalar damping
+		// Cascaded filter chain: HPF (40 Hz, 2nd-order) → Decorr → LPF (3 kHz) → Gain → scalar damping
 		Lp1 crossfeedLowpass_;   // Lowpass filter for frequency-dependent damping (3 kHz default)
-		Hp1 crossfeedHighpass_;  // Highpass filter for DC blocking (40 Hz default)
+		Hp2 crossfeedHighpass_;  // 2nd-order Butterworth HPF for DC blocking (40 Hz default, -12dB/oct)
 
 		// ADC-IMPLEMENTS: <reverbv1-topology-algo-05>
 		// Phase 3.2: Decorrelation module for frequency-specific resonance reduction
