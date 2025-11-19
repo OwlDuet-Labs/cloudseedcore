@@ -527,18 +527,30 @@ namespace Cloudseed
 				// Topology: Raw → HPF (40Hz) → Decorr (±0.5¢) → LPF (3kHz) → Gain (-6.1dB) → Damping → Inject
 				if (filterEnabled)
 				{
+					// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algo-05>
+					// Decorrelation processing requires buffer-based API
+					// Strategy: HPF sample-by-sample → Decorr buffer → LPF sample-by-sample
+					float decorrelationBuffer[BUFFER_SIZE];
+
 					// STEP 1: Read raw feedback from opposite channel's previous block
-					// STEP 2: HPF - DC blocking and subsonic attenuation
-					// STEP 3: Decorrelation (v1.2) - Break up frequency-specific resonances
-					// STEP 4: LPF - Frequency-dependent damping
-					// STEP 5: Gain staging (v1.2) - Loop energy reduction
-					// STEP 6: Scalar damping - Final gain adjustment
-					// STEP 7: Inject into late diffusion input
+					// STEP 2: HPF - DC blocking and subsonic attenuation (sample-by-sample)
 					for (int i = 0; i < bufSize; i++)
 					{
 						float raw = crossfeedLateInputBuffer_[i];
-						float hp = crossfeedHighpass_.Process(raw);              // STEP 2: DC blocking
-						float decorr = decorrEnabled ? crossfeedDecorrelation_.Process(hp) : hp; // STEP 3: Decorr (optional)
+						decorrelationBuffer[i] = crossfeedHighpass_.Process(raw);
+					}
+
+					// STEP 3: Decorrelation (v1.2) - Break up frequency-specific resonances (buffer)
+					// ADC-USES-PROMPT: reverbv1-crossfeed-topology-adc-004::DecorrelationModule
+					if (decorrEnabled)
+					{
+						crossfeedDecorrelation_.Process(decorrelationBuffer, bufSize);
+					}
+
+					// STEP 4-7: Continue processing chain (sample-by-sample)
+					for (int i = 0; i < bufSize; i++)
+					{
+						float decorr = decorrelationBuffer[i];
 						float lp = crossfeedLowpass_.Process(decorr);            // STEP 4: Frequency damping
 						float gainStaged = crossfeedGainStaging_.Process(lp);    // STEP 5: Gain staging
 						float dampedFeedback = lateAmount * damping * gainStaged; // STEP 6: Scalar damping
