@@ -312,6 +312,49 @@ namespace Cloudseed
 			}
 		}
 
+		// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-impl-02>
+		/**
+		 * ProcessEarlyOnly: Early processing chain for FDN integration
+		 *
+		 * Processes input through early chain only (no late lines):
+		 * - Input filters (low cut, high cut)
+		 * - Pre-delay
+		 * - Multi-tap early reflections
+		 * - Early allpass diffusion
+		 *
+		 * Output is fed to FDN for late reverb processing.
+		 */
+		void ProcessEarlyOnly(float* input, float* output, int bufSize)
+		{
+			float tempBuffer[BUFFER_SIZE];
+
+			Utils::Copy(tempBuffer, input, bufSize);
+
+			// Input filtering
+			if (lowCutEnabled)
+				highPass.Process(tempBuffer, tempBuffer, bufSize);
+			if (highCutEnabled)
+				lowPass.Process(tempBuffer, tempBuffer, bufSize);
+
+			// Denormalization (prevent CPU spikes from very small values)
+			for (int i = 0; i < bufSize; i++)
+			{
+				auto n = tempBuffer[i];
+				if (n * n < 0.000000001)
+					tempBuffer[i] = 0;
+			}
+
+			// Early processing chain (preserved from CloudSeed)
+			preDelay.Process(tempBuffer, tempBuffer, bufSize);
+			if (multitapEnabled)
+				multitap.Process(tempBuffer, tempBuffer, bufSize);
+			if (diffuserEnabled)
+				diffuser.Process(tempBuffer, tempBuffer, bufSize);
+
+			// Output is early processed signal (ready for FDN input)
+			Utils::Copy(output, tempBuffer, bufSize);
+		}
+
 		void Process(float* input, float* output, int bufSize)
 		{
 			float tempBuffer[BUFFER_SIZE];
@@ -340,7 +383,7 @@ namespace Cloudseed
 				multitap.Process(tempBuffer, tempBuffer, bufSize);
 			if (diffuserEnabled)
 				diffuser.Process(tempBuffer, tempBuffer, bufSize);
-			
+
 			Utils::Copy(earlyOutBuffer, tempBuffer, bufSize);
 			Utils::ZeroBuffer(lineSumBuffer, bufSize);
 			for (int i = 0; i < lineCount; i++)
