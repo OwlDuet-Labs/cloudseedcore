@@ -135,15 +135,19 @@ public:
 };
 
 // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-02>
-// Delay length computation with sample rate scaling
+// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
+// Delay length computation with sample rate scaling and size multiplier
 class DelayLengthCalculator
 {
 public:
-    // Compute delay length scaled to target sample rate
-    static int computeDelayLength(int baseLength48k, double sampleRate)
+    // Compute delay length scaled to target sample rate with size multiplier
+    static int computeDelayLength(int baseLength48k, double sampleRate, float sizeMultiplier)
     {
-        // Scale delay length proportionally to sample rate
-        double scaleFactor = sampleRate / 48000.0;
+        // Three-factor scaling:
+        // 1. Base delay @ 48kHz
+        // 2. Sample rate scaling factor
+        // 3. Size multiplier (user-controlled)
+        double scaleFactor = (sampleRate / 48000.0) * sizeMultiplier;
         int scaledLength = static_cast<int>(baseLength48k * scaleFactor + 0.5);
 
         // Ensure minimum delay (prevent zero-length delays)
@@ -154,12 +158,12 @@ public:
         return scaledLength;
     }
 
-    // Compute all delay lengths for target sample rate with coprimality preservation
-    static void computeAllDelayLengths(int outputLengths[], double sampleRate)
+    // Compute all delay lengths for target sample rate with size multiplier and coprimality preservation
+    static void computeAllDelayLengths(int outputLengths[], double sampleRate, float sizeMultiplier = 1.0f)
     {
-        // Step 1: Scale all delays to target sample rate
+        // Step 1: Scale all delays to target sample rate WITH size multiplier
         for (int i = 0; i < FDNConfig::N; i++) {
-            outputLengths[i] = computeDelayLength(FDNConfig::delayLengths48k[i], sampleRate);
+            outputLengths[i] = computeDelayLength(FDNConfig::delayLengths48k[i], sampleRate, sizeMultiplier);
         }
 
         // Step 2: Enforce coprimality across all delay pairs

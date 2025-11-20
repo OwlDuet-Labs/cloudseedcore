@@ -65,6 +65,7 @@ public:
 
     // Parameter setters (atomic, thread-safe from message thread)
     void setDecayTime(float rt60Seconds);
+    void setFDNSize(float sizeMs);  // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
     void setModulationAmount(float amount);  // 0-1
     void setModulationRate(float hz);
     void setEQEnabled(bool lowShelf, bool highShelf, bool lowpass);
@@ -90,6 +91,7 @@ private:
 
     // Parameters (atomic for thread-safe updates from message thread)
     std::atomic<float> decayGain_;
+    std::atomic<float> sizeMultiplier_;  // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
     std::atomic<float> modulationDepth_;
     std::atomic<float> modulationFreq_;
 
@@ -107,6 +109,7 @@ private:
     double currentSampleRate_;
     int scaledDelayLengths_[FDNConfig::N];
     bool eqNeedsUpdate_;
+    bool delayLengthsNeedUpdate_;  // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
 
     // Internal methods
     void updateDelayLengths();

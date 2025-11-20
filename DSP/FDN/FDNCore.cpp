@@ -19,6 +19,7 @@ namespace FDN {
 FDNCore::FDNCore()
     : currentSampleRate_(48000.0)
     , decayGain_(0.8f)
+    , sizeMultiplier_(1.0f)  // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
     , modulationDepth_(0.0f)
     , modulationFreq_(1.0f)
     , eqLowShelfEnabled_(false)
@@ -30,6 +31,7 @@ FDNCore::FDNCore()
     , eqLowGain_(0.0f)
     , eqHighGain_(0.0f)
     , eqNeedsUpdate_(false)
+    , delayLengthsNeedUpdate_(false)  // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
 {
     // Initialize LFO phases with unique offsets per line (avoid correlation)
     for (int i = 0; i < FDNConfig::N; i++) {
@@ -81,6 +83,7 @@ void FDNCore::reset()
 
 // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-impl-01>
 // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-injection>
+// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
 /**
  * Main FDN processing loop with divergent stereo injection
  *
@@ -91,18 +94,48 @@ void FDNCore::reset()
  * 4. DIVERGENT INJECTION: L→lines 0-3, R→lines 4-7
  * 5. Write feedback + input to delay lines
  * 6. Sum outputs: L=lines[0-3], R=lines[4-7]
+ *
+ * v1.1 Updates:
+ * - Prime-based modulation frequency offsets per line
+ * - Complete bypass when modulation depth = 0
+ * - Reduced modulation depth range (0-0.5 samples)
  */
 void FDNCore::process(const float* inputL, const float* inputR,
                      float* outputL, float* outputR, int numSamples)
 {
+    // Prime multipliers for frequency offset (not just phase offset)
+    // Each line modulates at slightly different rate for decorrelation
+    // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
+    static constexpr float primeMultipliers[FDNConfig::N] = {
+        1.000f,  // Line 0: base frequency
+        1.013f,  // Line 1: +1.3% (prime: 101/100)
+        1.031f,  // Line 2: +3.1% (prime: 103/100)
+        1.061f,  // Line 3: +6.1% (prime: 107/100)
+        1.091f,  // Line 4: +9.1% (prime: 109/100)
+        1.131f,  // Line 5: +13.1% (prime: 113/100)
+        1.193f,  // Line 6: +19.3% (prime: 127/100)
+        1.311f   // Line 7: +31.1% (prime: 131/100)
+    };
+
     // Load current parameters (atomic reads, lock-free)
     const float decay = decayGain_.load(std::memory_order_relaxed);
     const float modDepth = modulationDepth_.load(std::memory_order_relaxed);
+    const float modFreq = modulationFreq_.load(std::memory_order_relaxed);
+
+    // v1.1: Complete bypass when depth=0 (CRITICAL FIX)
+    const bool modulationEnabled = (modDepth > 0.00001f);
 
     // Update EQ if parameters changed
     if (eqNeedsUpdate_) {
         updateEQFilters();
         eqNeedsUpdate_ = false;
+    }
+
+    // Update delay lengths if size changed
+    // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
+    if (delayLengthsNeedUpdate_) {
+        updateDelayLengths();
+        delayLengthsNeedUpdate_ = false;
     }
 
     // Energy normalization factor for output sum
@@ -116,12 +149,21 @@ void FDNCore::process(const float* inputL, const float* inputR,
     // Process each sample
     for (int sample = 0; sample < numSamples; sample++) {
         // ================================================
-        // STEP 1: Read from delay lines + Apply EQ
+        // STEP 1: Read from delay lines + Apply Modulation with Prime Offsets + Apply EQ
         // ================================================
         for (int i = 0; i < FDNConfig::N; i++) {
-            // Set modulation parameters on delay line
-            delayLines_[i].ModAmount = modDepth;
-            delayLines_[i].ModRate = modulationFreq_.load(std::memory_order_relaxed);
+            // v1.1: Apply prime-based frequency offsets for each line
+            // Each line gets unique modulation frequency (not just phase)
+            // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
+            if (modulationEnabled) {
+                float lineFreq = modFreq * primeMultipliers[i];
+                delayLines_[i].ModAmount = modDepth;
+                delayLines_[i].ModRate = lineFreq;
+            } else {
+                // Complete bypass when depth=0
+                delayLines_[i].ModAmount = 0.0f;
+                delayLines_[i].ModRate = 0.0f;
+            }
 
             // Process delay line: write feedback from previous iteration, read delayed output
             // Note: feedbackInput_ was prepared in previous iteration
@@ -227,20 +269,58 @@ void FDNCore::setDecayTime(float rt60Seconds)
 }
 
 // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-04>
+// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
+void FDNCore::setFDNSize(float sizeMs)
+{
+    // Map parameter value (20-1000ms) to size multiplier
+    // At 236ms (default), multiplier = 1.0 (no scaling)
+    // Range: 0.5x to 2.0x scaling
+
+    constexpr float defaultSizeMs = 236.0f;
+    constexpr float minSizeMs = 20.0f;
+    constexpr float maxSizeMs = 1000.0f;
+
+    // Clamp to valid range
+    float clampedSize = sizeMs;
+    if (clampedSize < minSizeMs) clampedSize = minSizeMs;
+    if (clampedSize > maxSizeMs) clampedSize = maxSizeMs;
+
+    // Compute multiplier relative to default
+    float multiplier = clampedSize / defaultSizeMs;
+
+    // Clamp multiplier to safe range (0.5x to 2.0x)
+    if (multiplier < 0.5f) multiplier = 0.5f;
+    if (multiplier > 2.0f) multiplier = 2.0f;
+
+    sizeMultiplier_.store(multiplier, std::memory_order_relaxed);
+    delayLengthsNeedUpdate_ = true;
+
+    // Recompute delay lengths with new size multiplier
+    updateDelayLengths();
+}
+
+// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
 void FDNCore::setModulationAmount(float amount)
 {
+    // v1.1: Reduced depth range for subtle chorus effect
+    // Map parameter [0, 1] to actual depth [0, 0.5] samples
+    constexpr float maxDepthSamples = 0.5f;
+
     // Clamp to [0, 1] range
     if (amount < 0.0f) amount = 0.0f;
     if (amount > 1.0f) amount = 1.0f;
 
-    modulationDepth_.store(amount, std::memory_order_relaxed);
+    float depthSamples = amount * maxDepthSamples;
+    modulationDepth_.store(depthSamples, std::memory_order_relaxed);
 }
 
+// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
 void FDNCore::setModulationRate(float hz)
 {
-    // Clamp to reasonable range [0.01, 10 Hz]
+    // v1.1: Accept rate directly (logarithmic scaling done in parameter mapping)
+    // Clamp to reasonable range [0.01, 2 Hz] for natural modulation
     if (hz < 0.01f) hz = 0.01f;
-    if (hz > 10.0f) hz = 10.0f;
+    if (hz > 2.0f) hz = 2.0f;
 
     modulationFreq_.store(hz, std::memory_order_relaxed);
 }
@@ -326,9 +406,19 @@ float FDNCore::processEQ(int lineIndex, float input)
 }
 
 // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-02>
+// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
 void FDNCore::updateDelayLengths()
 {
-    DelayLengthCalculator::computeAllDelayLengths(scaledDelayLengths_, currentSampleRate_);
+    // Get current size multiplier
+    float sizeMult = sizeMultiplier_.load(std::memory_order_relaxed);
+
+    // Compute delay lengths with size multiplier applied
+    DelayLengthCalculator::computeAllDelayLengths(scaledDelayLengths_, currentSampleRate_, sizeMult);
+
+    // Update delay line buffer sizes
+    for (int i = 0; i < FDNConfig::N; i++) {
+        delayLines_[i].SampleDelay = scaledDelayLengths_[i];
+    }
 }
 
 } // namespace FDN

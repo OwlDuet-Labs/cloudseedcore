@@ -84,18 +84,29 @@ namespace Cloudseed
 				// ========================================================
 				// FDN-SPECIFIC PARAMETERS
 				// ========================================================
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-rt60-scaling>
 				case Parameter::LateLineDecay:
 					// RT60 decay time → FDN decay gain
+					// Note: RT60 scaling happens in plugin parameter mapping
 					fdnCore.setDecayTime(scaled);
 					break;
 
-				case Parameter::LateLineModAmount:
-					// Modulation depth → FDN modulation (normalize to 0-1)
-					fdnCore.setModulationAmount(scaled / 2.5f);
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
+				case Parameter::LateLineSize:
+					// FDN Size parameter (20-1000ms) → size multiplier
+					fdnCore.setFDNSize(scaled);
 					break;
 
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
+				case Parameter::LateLineModAmount:
+					// Modulation depth → FDN modulation (already normalized to 0-1)
+					fdnCore.setModulationAmount(scaled);
+					break;
+
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
 				case Parameter::LateLineModRate:
 					// Modulation frequency → FDN modulation rate
+					// Note: Logarithmic rate scaling happens in plugin parameter mapping
 					fdnCore.setModulationRate(scaled);
 					break;
 
