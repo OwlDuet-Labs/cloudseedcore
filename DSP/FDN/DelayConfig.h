@@ -42,6 +42,14 @@ struct FDNConfig
         true, true, true, true,      // Lines 0-3: L
         false, false, false, false   // Lines 4-7: R
     };
+
+    // Channel enum for testing
+    enum class Channel { LEFT, RIGHT };
+
+    // Get channel assignment for a delay line
+    static Channel getChannelAssignment(int lineIndex) {
+        return isLeftChannel[lineIndex] ? Channel::LEFT : Channel::RIGHT;
+    }
 };
 
 // ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-coprime>
