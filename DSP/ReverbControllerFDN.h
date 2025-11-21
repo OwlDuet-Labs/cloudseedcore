@@ -1,8 +1,9 @@
 /*
 FDN-Integrated Reverb Controller
-Replaces late parallel delay lines with 8x8 FDN while preserving early processing.
+Replaces late parallel delay lines with runtime-switchable 8×8/16×16 FDN while preserving early processing.
 
 ADC-IMPLEMENTS: <reverb-v1-fdn-topology-impl-02>
+ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-16x16-delays>
 */
 
 #pragma once
@@ -16,18 +17,25 @@ ADC-IMPLEMENTS: <reverb-v1-fdn-topology-impl-02>
 namespace Cloudseed
 {
 	// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-impl-02>
+	// ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-16x16-delays>
 	/**
-	 * ReverbControllerFDN: CloudSeed with FDN late reverb
+	 * ReverbControllerFDN: CloudSeed with Runtime-Switchable FDN Late Reverb
 	 *
 	 * Architecture:
 	 * - Early processing (per channel): Input filters, pre-delay, multitap, early diffusion
-	 * - Late processing (stereo coupled): 8x8 FDN with Hadamard matrix
+	 * - Late processing (stereo coupled): Runtime-switchable 8×8/16×16 FDN with Hadamard matrix
 	 * - Output mixing: Dry + Early + Late signals
+	 *
+	 * v1.2 Features:
+	 * - Runtime switching between 8×8 (64 echoes) and 16×16 (256 echoes)
+	 * - Smooth 50ms crossfade during size changes
+	 * - Absorptive filters for natural high-frequency decay
+	 * - Correction filters for flat frequency response
 	 *
 	 * Changes from original CloudSeed:
 	 * - Removed: 12 parallel delay lines per channel
 	 * - Removed: Late allpass diffusion (in feedback loop)
-	 * - Added: FDN with divergent L/R injection and matrix coupling
+	 * - Added: FDNCoreManager with dual 8×8/16×16 instances
 	 * - Preserved: All early processing completely unchanged
 	 */
 	class ReverbControllerFDN
@@ -37,7 +45,7 @@ namespace Cloudseed
 
 		ReverbChannel channelL;
 		ReverbChannel channelR;
-		FDN::FDNCore fdnCore;
+		FDN::FDNCoreManager fdnCoreManager;  // v1.2: Dual-instance manager
 
 		double parameters[(int)Parameter::COUNT] = {0};
 
@@ -47,7 +55,7 @@ namespace Cloudseed
 			channelR(samplerate, ChannelLR::Right)
 		{
 			this->samplerate = samplerate;
-			fdnCore.prepare(samplerate, BUFFER_SIZE);
+			fdnCoreManager.prepare(samplerate, BUFFER_SIZE);
 		}
 
 		int GetSamplerate()
@@ -60,7 +68,7 @@ namespace Cloudseed
 			this->samplerate = samplerate;
 			channelL.SetSamplerate(samplerate);
 			channelR.SetSamplerate(samplerate);
-			fdnCore.prepare(samplerate, BUFFER_SIZE);
+			fdnCoreManager.prepare(samplerate, BUFFER_SIZE);
 		}
 
 		int GetParameterCount()
@@ -87,34 +95,32 @@ namespace Cloudseed
 				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-rt60-scaling>
 				case Parameter::LateLineDecay:
 					// RT60 decay time → FDN decay gain
-					// Note: RT60 scaling happens in plugin parameter mapping
-					fdnCore.setDecayTime(scaled);
+					fdnCoreManager.setDecayTime(scaled);
 					break;
 
 				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-size-scaling>
 				case Parameter::LateLineSize:
 					// FDN Size parameter (20-1000ms) → size multiplier
-					fdnCore.setFDNSize(scaled);
+					fdnCoreManager.setFDNSizeMs(scaled);
 					break;
 
 				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
 				case Parameter::LateLineModAmount:
 					// Modulation depth → FDN modulation (already normalized to 0-1)
-					fdnCore.setModulationAmount(scaled);
+					fdnCoreManager.setModulationAmount(scaled);
 					break;
 
 				// ADC-IMPLEMENTS: <reverb-v1-fdn-topology-algo-modulation>
 				case Parameter::LateLineModRate:
 					// Modulation frequency → FDN modulation rate
-					// Note: Logarithmic rate scaling happens in plugin parameter mapping
-					fdnCore.setModulationRate(scaled);
+					fdnCoreManager.setModulationRate(scaled);
 					break;
 
 				case Parameter::EqLowShelfEnabled:
 				case Parameter::EqHighShelfEnabled:
 				case Parameter::EqLowpassEnabled:
 					// EQ enable flags → FDN EQ
-					fdnCore.setEQEnabled(
+					fdnCoreManager.setEQEnabled(
 						parameters[Parameter::EqLowShelfEnabled] >= 0.5,
 						parameters[Parameter::EqHighShelfEnabled] >= 0.5,
 						parameters[Parameter::EqLowpassEnabled] >= 0.5
@@ -125,7 +131,7 @@ namespace Cloudseed
 				case Parameter::EqHighFreq:
 				case Parameter::EqCutoff:
 					// EQ frequencies → FDN EQ
-					fdnCore.setEQFrequencies(
+					fdnCoreManager.setEQFrequencies(
 						ScaleParam(parameters[Parameter::EqLowFreq], Parameter::EqLowFreq),
 						ScaleParam(parameters[Parameter::EqHighFreq], Parameter::EqHighFreq),
 						ScaleParam(parameters[Parameter::EqCutoff], Parameter::EqCutoff)
@@ -135,10 +141,35 @@ namespace Cloudseed
 				case Parameter::EqLowGain:
 				case Parameter::EqHighGain:
 					// EQ gains → FDN EQ
-					fdnCore.setEQGains(
+					fdnCoreManager.setEQGains(
 						ScaleParam(parameters[Parameter::EqLowGain], Parameter::EqLowGain),
 						ScaleParam(parameters[Parameter::EqHighGain], Parameter::EqHighGain)
 					);
+					break;
+
+				// ========================================================
+				// v1.2: QUALITY IMPROVEMENT PARAMETERS
+				// ========================================================
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-absorptive>
+				case Parameter::AbsorptionCutoff:
+					// Absorption cutoff frequency → FDN absorptive filters
+					fdnCoreManager.setAbsorptionCutoff(scaled);
+					break;
+
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-absorptive>
+				case Parameter::AbsorptionAmount:
+					// Absorption amount (0-1) → FDN absorptive filters
+					fdnCoreManager.setAbsorptionAmount(scaled);
+					break;
+
+				// ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-16x16-delays>
+				case Parameter::LateDiffuseFeedback:
+					// REPURPOSED: Parameter 30 now controls FDN Matrix Size
+					// Value mapping: 0.0-0.5 → 8×8, 0.5-1.0 → 16×16
+					{
+						int fdnSize = (scaled < 0.5f) ? 8 : 16;
+						fdnCoreManager.setFDNSize(fdnSize);
+					}
 					break;
 
 				// ========================================================
@@ -150,12 +181,11 @@ namespace Cloudseed
 				case Parameter::LateDiffuseCount:
 				case Parameter::LateDiffuseDelay:
 				case Parameter::LateDiffuseModAmount:
-				case Parameter::LateDiffuseFeedback:
 				case Parameter::LateDiffuseModRate:
 				case Parameter::SeedDelay:
 				case Parameter::SeedPostDiffusion:
 					// These parameters are not used in FDN architecture
-					// FDN has fixed 8 lines, no late diffusion, fixed delays
+					// FDN has fixed 8/16 lines, no late diffusion, fixed delays
 					break;
 
 				// ========================================================
@@ -173,7 +203,7 @@ namespace Cloudseed
 		{
 			channelL.ClearBuffers();
 			channelR.ClearBuffers();
-			fdnCore.reset();
+			fdnCoreManager.reset();
 		}
 
 		void Process(float* inL, float* inR, float* outL, float* outR, int bufSize)
@@ -223,18 +253,17 @@ namespace Cloudseed
 			// STAGE 2: Early processing (per channel, preserved from CloudSeed)
 			// ========================================================
 			// Process through early chain: filters, pre-delay, multitap, early diffusion
-			// NOTE: ReverbChannel now only does early processing (late lines disabled)
 			channelL.ProcessEarlyOnly(leftChannelIn, earlyOutL, bufSize);
 			channelR.ProcessEarlyOnly(rightChannelIn, earlyOutR, bufSize);
 
 			// ========================================================
-			// STAGE 3: FDN late reverb (stereo coupled)
+			// STAGE 3: FDN late reverb (stereo coupled, runtime-switchable 8×8/16×16)
 			// ========================================================
-			// FDN processes early outputs with divergent injection:
-			// - L channel → lines 0-3
-			// - R channel → lines 4-7
+			// FDNCoreManager handles dual instances with smooth crossfade
+			// - L channel → lines 0..N/2-1
+			// - R channel → lines N/2..N-1
 			// - Matrix feedback creates natural stereo coupling
-			fdnCore.process(earlyOutL, earlyOutR, lateOutL, lateOutR, bufSize);
+			fdnCoreManager.process(earlyOutL, earlyOutR, lateOutL, lateOutR, bufSize);
 
 			// ========================================================
 			// STAGE 4: Output mixing

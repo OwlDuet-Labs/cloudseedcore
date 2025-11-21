@@ -82,7 +82,12 @@ namespace Cloudseed
         const int SeedDelay = 43;
         const int SeedPostDiffusion = 44;
 
-        const int COUNT = 45;
+        // v1.2: Quality improvement parameters
+        // ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-absorptive>
+        const int AbsorptionCutoff = 45;  // 1kHz-20kHz, log scaled
+        const int AbsorptionAmount = 46;  // 0-100%, linear
+
+        const int COUNT = 47;
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -172,6 +177,15 @@ namespace Cloudseed
             return -20 + val * 20;
         case Parameter::EqHighGain:
             return -20 + val * 20;
+
+        // v1.2: Quality improvement parameters
+        // ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-absorptive>
+        case Parameter::AbsorptionCutoff:
+            // Logarithmic scaling: 1kHz - 20kHz
+            return 1000.0 + Utils::Resp4oct(val) * 19000.0;
+        case Parameter::AbsorptionAmount:
+            // Linear scaling: 0-100% → 0-1
+            return val;
         }
         return 0;
     }
@@ -275,6 +289,18 @@ namespace Cloudseed
         case Parameter::EqLowGain:
         case Parameter::EqHighGain:
             snprintf(buffer, MAX_STR_SIZE, "%.1f dB", s);
+            break;
+
+        // v1.2: Quality improvement parameters
+        // ADC-IMPLEMENTS: <reverb-v1-fdn-quality-algo-absorptive>
+        case Parameter::AbsorptionCutoff:
+            if (s < 1000)
+                snprintf(buffer, MAX_STR_SIZE, "%d Hz", (int)s);
+            else
+                snprintf(buffer, MAX_STR_SIZE, "%.1f kHz", s / 1000.0);
+            break;
+        case Parameter::AbsorptionAmount:
+            snprintf(buffer, MAX_STR_SIZE, "%d%%", (int)(s * 100));
             break;
 
         default:
