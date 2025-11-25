@@ -20,11 +20,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algorithm-06>
+// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-cloudseeddspcore-adc-002)
 //
 // Gain Staging Module Implementation
 //
-// Contract: reverbv1-crossfeed-topology-adc-004, lines 911-1013
+// Contract: reverbv1-cloudseeddspcore-adc-002 (consolidated from reverbv1-crossfeed-topology-adc-004)
 // Purpose: Reduce feedback loop energy independently of damping coefficient
 //
 // This module provides simple gain multiplication to reduce feedback loop energy.

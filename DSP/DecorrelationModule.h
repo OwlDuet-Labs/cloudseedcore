@@ -28,11 +28,11 @@ THE SOFTWARE.
 
 namespace Cloudseed
 {
-	// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algorithm-05>
+	// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-cloudseeddspcore-adc-002)
 	//
 	// Decorrelation Module - Breaks up frequency-specific resonances via pitch modulation
 	//
-	// Contract: reverbv1-crossfeed-topology-adc-004, lines 779-908
+	// Contract: reverbv1-cloudseeddspcore-adc-002 (consolidated from reverbv1-crossfeed-topology-adc-004)
 	// Purpose: Apply slight pitch modulation to reduce frequency-specific buildup
 	//          in feedback path without audible artifacts
 	//

@@ -542,7 +542,7 @@ namespace Cloudseed
 					}
 
 					// STEP 3: Decorrelation (v1.2) - Break up frequency-specific resonances (buffer)
-					// ADC-USES-PROMPT: reverbv1-crossfeed-topology-adc-004::DecorrelationModule
+					// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-cloudseeddspcore-adc-002)
 					if (decorrEnabled)
 					{
 						crossfeedDecorrelation_.Process(decorrelationBuffer, bufSize);
