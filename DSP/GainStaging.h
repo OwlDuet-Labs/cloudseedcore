@@ -27,11 +27,11 @@ THE SOFTWARE.
 
 namespace Cloudseed
 {
-	// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-cloudseeddspcore-adc-002)
+	// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-architecture-adc-001)
 	//
 	// Gain Staging Module - Reduces feedback loop energy independently of damping coefficient
 	//
-	// Contract: reverbv1-cloudseeddspcore-adc-002 (consolidated from reverbv1-crossfeed-topology-adc-004)
+	// Contract: reverbv1-architecture-adc-001 (consolidated from reverbv1-architecture-adc-001)
 	// Purpose: Apply simple multiplication by linear gain factor derived from dB parameter
 	//          to reduce feedback loop energy and prevent instability
 	//

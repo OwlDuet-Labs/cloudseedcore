@@ -27,7 +27,7 @@ THE SOFTWARE.
 
 namespace Cloudseed
 {
-	// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-cloudseeddspcore-adc-002)
+	// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-architecture-adc-001)
 	// 2nd-order Butterworth highpass filter for crossfeed DC blocking and subsonic rejection
 	// Provides -12 dB/octave rolloff below cutoff frequency
 	//
