@@ -34,7 +34,6 @@ THE SOFTWARE.
 #include "DelayLine.h"
 #include "AllpassDiffuser.h"
 #include "GainStaging.h"
-#include "DecorrelationModule.h"
 #include <cmath>
 #include "ReverbChannel.h"
 #include "Utils.h"
@@ -101,13 +100,9 @@ namespace Cloudseed
 
 		// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
 		// Phase 3: Frequency-dependent damping filters for late crossfeed stability
-		// Cascaded filter chain: HPF (40 Hz, 2nd-order) → Decorr → LPF (3 kHz) → Gain → scalar damping
-		Lp1 crossfeedLowpass_;   // Lowpass filter for frequency-dependent damping (3 kHz default)
+		// Cascaded filter chain: HPF (40 Hz, 2nd-order) → LPF (8 kHz) → Gain → scalar damping
+		Lp1 crossfeedLowpass_;   // Lowpass filter for frequency-dependent damping (8 kHz default)
 		Hp2 crossfeedHighpass_;  // 2nd-order Butterworth HPF for DC blocking (40 Hz default, -12dB/oct)
-
-		// ADC-IMPLEMENTS: <reverbv1-topology-algo-05>
-		// Phase 3.2: Decorrelation module for frequency-specific resonance reduction
-		DecorrelationModule crossfeedDecorrelation_;  // Pitch detune decorrelation (±0.5 cents)
 
 		// ADC-IMPLEMENTS: <reverbv1-topology-algo-06>
 		// Phase 3.2: Gain staging for feedback loop energy reduction
@@ -132,7 +127,7 @@ namespace Cloudseed
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
 			// Initialize crossfeed damping filters with default cutoffs
 			crossfeedHighpass_.SetCutoffHz(40);   // DC blocking (20-100 Hz range)
-			crossfeedLowpass_.SetCutoffHz(3000);  // Frequency-dependent damping (1000-8000 Hz range)
+			crossfeedLowpass_.SetCutoffHz(8000);  // Frequency-dependent damping (1000-8000 Hz range)
 
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-06>
 			// Initialize gain staging with default -6.1 dB
@@ -157,10 +152,6 @@ namespace Cloudseed
 			// Set sample rate for crossfeed damping filters
 			crossfeedHighpass_.SetSamplerate(samplerate);
 			crossfeedLowpass_.SetSamplerate(samplerate);
-
-			// ADC-IMPLEMENTS: <reverbv1-topology-algo-05>
-			// Initialize decorrelation module (maxBlockSize = 512 samples typical)
-			crossfeedDecorrelation_.Initialize(samplerate, 512);
 
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-06>
 			// Set sample rate for gain staging smoothing
@@ -399,16 +390,6 @@ namespace Cloudseed
 				// Just store in paramsScaled array
 				break;
 
-			// ADC-IMPLEMENTS: <reverbv1-topology-algo-05>
-			// Phase 3.2: Decorrelation module parameters
-			case Parameter::DecorrelationEnabled:
-				// Enable state handled in process loop
-				// Just store in paramsScaled array
-				break;
-			case Parameter::DecorrelationAmount:
-				crossfeedDecorrelation_.SetDepth(scaledValue);
-				break;
-
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-06>
 			// Phase 3.2: Gain staging parameter
 			case Parameter::GainStaging:
@@ -509,58 +490,34 @@ namespace Cloudseed
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-01>
 			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algo-03>
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-04>
-			// ADC-IMPLEMENTS: <reverbv1-topology-algo-05>
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-06>
 			// Phase 3: Late diffusion feedback crossfeed with FREQUENCY-DEPENDENT damping for stability
-			// Phase 3.2: Added decorrelation and gain staging modules for enhanced stability
 			// CRITICAL: Inject feedback BEFORE late diffusion processing (not at output)
 			// This creates a true feedback loop where late diffusion processes the crossfeed energy
-			// V1.2: Full stability chain prevents infinite feedback at all parameter settings
+			// Stability chain prevents infinite feedback at all parameter settings
 			if (lateCrossfeedEnabled_ && crossfeedLateInputBuffer_ != nullptr)
 			{
 				float lateAmount = paramsScaled[Parameter::LateCrossfeedAmount];
 				float damping = paramsScaled[Parameter::CrossfeedDamping];
 				bool filterEnabled = paramsScaled[Parameter::CrossfeedFilterEnabled] >= 0.5;
-				bool decorrEnabled = paramsScaled[Parameter::DecorrelationEnabled] >= 0.5;
-				float gainStagingDB = paramsScaled[Parameter::GainStaging];
 
-				// V1.2: Apply full stability chain
-				// Topology: Raw → HPF (40Hz) → Decorr (±0.5¢) → LPF (3kHz) → Gain (-6.1dB) → Damping → Inject
+				// Apply stability chain
+				// Topology: Raw → HPF (40Hz) → LPF (8kHz) → Gain (-6.1dB) → Damping → Inject
 				if (filterEnabled)
 				{
-					// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algo-05>
-					// Decorrelation processing requires buffer-based API
-					// Strategy: HPF sample-by-sample → Decorr buffer → LPF sample-by-sample
-					float decorrelationBuffer[BUFFER_SIZE];
-
-					// STEP 1: Read raw feedback from opposite channel's previous block
-					// STEP 2: HPF - DC blocking and subsonic attenuation (sample-by-sample)
 					for (int i = 0; i < bufSize; i++)
 					{
 						float raw = crossfeedLateInputBuffer_[i];
-						decorrelationBuffer[i] = crossfeedHighpass_.Process(raw);
-					}
-
-					// STEP 3: Decorrelation (v1.2) - Break up frequency-specific resonances (buffer)
-					// ADC-IMPLEMENTS: <reverbv1-topology-algo-04> (consolidated into reverbv1-architecture-adc-001)
-					if (decorrEnabled)
-					{
-						crossfeedDecorrelation_.Process(decorrelationBuffer, bufSize);
-					}
-
-					// STEP 4-7: Continue processing chain (sample-by-sample)
-					for (int i = 0; i < bufSize; i++)
-					{
-						float decorr = decorrelationBuffer[i];
-						float lp = crossfeedLowpass_.Process(decorr);            // STEP 4: Frequency damping
-						float gainStaged = crossfeedGainStaging_.Process(lp);    // STEP 5: Gain staging
-						float dampedFeedback = lateAmount * damping * gainStaged; // STEP 6: Scalar damping
-						tempBuffer[i] += dampedFeedback;                         // STEP 7: Inject
+						float hp = crossfeedHighpass_.Process(raw);               // STEP 1: DC blocking
+						float lp = crossfeedLowpass_.Process(hp);                 // STEP 2: Frequency damping
+						float gainStaged = crossfeedGainStaging_.Process(lp);     // STEP 3: Gain staging
+						float dampedFeedback = lateAmount * damping * gainStaged; // STEP 4: Scalar damping
+						tempBuffer[i] += dampedFeedback;                          // STEP 5: Inject
 					}
 				}
 				else
 				{
-					// V1.0: Simple scalar damping (frequency-independent) - LEGACY MODE
+					// Simple scalar damping (frequency-independent) - LEGACY MODE
 					// Loop gain = lateAmount × damping must be < 1.0
 					// Example: 0.3 × 0.85 = 0.255 (stable for short durations)
 					float dampedGain = lateAmount * damping;
@@ -619,12 +576,8 @@ namespace Cloudseed
 			crossfeedLowpass_.ClearBuffers();
 			crossfeedHighpass_.ClearBuffers();
 
-			// ADC-IMPLEMENTS: <reverbv1-topology-algo-05>
-			// Phase 3.2: Clear decorrelation module state (delay buffer and LFO phase)
-			crossfeedDecorrelation_.Reset();
-
 			// ADC-IMPLEMENTS: <reverbv1-topology-algo-06>
-			// Phase 3.2: Reset gain staging to default -6.1 dB
+			// Reset gain staging to default -6.1 dB
 			crossfeedGainStaging_.Reset();
 		}
 

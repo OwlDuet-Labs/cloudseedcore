@@ -38,7 +38,7 @@ THE SOFTWARE.
 // - Real-time safe (no allocations in Process())
 //
 // Integration with ReverbChannel:
-// - Apply gain staging after HPF/LPF/decorrelation processing
+// - Apply gain staging after HPF/LPF processing
 // - Before scalar damping and injection into late diffusion
 // - Contributes to overall loop stability: gainStaging × crossfeedAmount × damping < 1.0
 //

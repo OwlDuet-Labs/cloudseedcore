@@ -86,7 +86,7 @@ namespace Cloudseed
         // Crossfeed extension parameters (v1.1: 7 parameters, v1.2: 4 additional)
         // Phase 2: Infrastructure only - defaults maintain baseline CloudSeed behavior
         // Phase 3: Frequency-dependent damping filters (v1.1)
-        // Phase 3.2: Gain staging and decorrelation modules (v1.2)
+        // Phase 3.2: Gain staging (v1.2)
         const int CrossfeedEnabled = 45;         // 0.0=off, 1.0=on (mode flag)
         const int EarlyCrossfeedAmount = 46;     // 0.0 to 1.0 (early reflection crossfeed)
         const int LateCrossfeedAmount = 47;      // 0.0 to 1.0 (late diffusion crossfeed)
@@ -95,13 +95,11 @@ namespace Cloudseed
         const int CrossfeedHighpassCutoff = 50;  // 20-100 Hz (DC blocking)
         const int CrossfeedFilterEnabled = 51;   // 0.0=off, 1.0=on (enable filter chain)
 
-        // v1.2 Experimental Stability Parameters
+        // v1.2 Stability Parameters
         const int GainStaging = 52;              // -12.0 to 0.0 dB (default -6.1, loop energy reduction)
-        const int DecorrelationEnabled = 53;     // 0.0=off, 1.0=on (pitch detune for resonance reduction)
-        const int DecorrelationAmount = 54;      // 0.0 to 1.0 (depth, default 0.3, maps to ±0.5 cents)
-        const int ParameterLimitingEnabled = 55; // 0.0=off, 1.0=on (clamp params to safe ranges)
+        const int ParameterLimitingEnabled = 53; // 0.0=off, 1.0=on (clamp params to safe ranges)
 
-        const int COUNT = 56;  // Updated from 52 to 56 (11 total crossfeed parameters)
+        const int COUNT = 54;  // 45 CloudSeed + 9 crossfeed parameters
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -209,13 +207,9 @@ namespace Cloudseed
         case Parameter::CrossfeedFilterEnabled:
             return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default on)
 
-        // v1.2 Experimental Stability Parameters
+        // v1.2 Stability Parameters
         case Parameter::GainStaging:
             return -12.0 + val * 12.0;  // -12.0 to 0.0 dB, default -6.1 dB (val=0.492)
-        case Parameter::DecorrelationEnabled:
-            return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default off)
-        case Parameter::DecorrelationAmount:
-            return val;  // 0.0 to 1.0, default 0.3 (30% depth = ±0.15 cents)
         case Parameter::ParameterLimitingEnabled:
             return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default off)
         }
@@ -327,7 +321,6 @@ namespace Cloudseed
         // Crossfeed parameter formatting (v1.1 + v1.2)
         case Parameter::CrossfeedEnabled:
         case Parameter::CrossfeedFilterEnabled:
-        case Parameter::DecorrelationEnabled:
         case Parameter::ParameterLimitingEnabled:
             if (s == 1)
                 strcpy_s(buffer, MAX_STR_SIZE, "ENABLED");
@@ -336,7 +329,6 @@ namespace Cloudseed
             break;
         case Parameter::EarlyCrossfeedAmount:
         case Parameter::LateCrossfeedAmount:
-        case Parameter::DecorrelationAmount:
             snprintf(buffer, MAX_STR_SIZE, "%d%%", (int)(s * 100));
             break;
         case Parameter::CrossfeedDamping:
