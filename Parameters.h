@@ -96,10 +96,12 @@ namespace Cloudseed
         const int CrossfeedFilterEnabled = 51;   // 0.0=off, 1.0=on (enable filter chain)
 
         // v1.2 Stability Parameters
-        const int GainStaging = 52;              // -12.0 to 0.0 dB (default -6.1, loop energy reduction)
-        const int ParameterLimitingEnabled = 53; // 0.0=off, 1.0=on (clamp params to safe ranges)
+        const int GainStaging = 52;              // -30.0 to 0.0 dB (default -4.1, loop energy reduction)
+        // NOTE: ParameterLimitingEnabled (53) is DEPRECATED but kept for backward compatibility
+        // Production limits are now compile-time only via #ifdef REVERB_V1_EXPERIMENTAL_BUILD
+        const int ParameterLimitingEnabled = 53; // DEPRECATED: 0.0=off, 1.0=on (kept for preset compat)
 
-        const int COUNT = 54;  // 45 CloudSeed + 9 crossfeed parameters
+        const int COUNT = 54;  // 45 CloudSeed + 8 crossfeed + 1 deprecated (kept for backward compat)
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -147,12 +149,12 @@ namespace Cloudseed
         case Parameter::TapPredelay:
             return Utils::Resp1dec(val) * 500;
         case Parameter::TapLength:
-            return 10 + val * 990;
+            return 1 + val * 999;  // Range: 1-1000 ms
 
         case Parameter::EarlyDiffuseCount:
             return (int)(1 + val * 11.999);
         case Parameter::EarlyDiffuseDelay:
-            return 10 + val * 90;
+            return 1 + val * 99;  // Range: 1-100 ms
         case Parameter::EarlyDiffuseModAmount:
             return val * 2.5;
         case Parameter::EarlyDiffuseModRate:
@@ -199,7 +201,7 @@ namespace Cloudseed
         case Parameter::LateCrossfeedAmount:
             return val;  // 0.0 to 1.0, default 0.3 (30%)
         case Parameter::CrossfeedDamping:
-            return 0.7 + val * 0.25;  // 0.7 to 0.95, default 0.85
+            return val;  // 0.0 to 1.0 (direct passthrough, range handled by JUCE param)
         case Parameter::CrossfeedLowpassCutoff:
             return 1000 + val * 7000;  // 1000-8000 Hz, default 3000 Hz (val=0.286)
         case Parameter::CrossfeedHighpassCutoff:
@@ -209,8 +211,10 @@ namespace Cloudseed
 
         // v1.2 Stability Parameters
         case Parameter::GainStaging:
-            return -12.0 + val * 12.0;  // -12.0 to 0.0 dB, default -6.1 dB (val=0.492)
+            return -30.0 + val * 30.0;  // -30.0 to 0.0 dB (full range, limiting handled by JUCE param)
         case Parameter::ParameterLimitingEnabled:
+            // NOTE: This parameter is deprecated. Production limits are now compile-time only.
+            // Kept for backward compatibility with older presets/sessions
             return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default off)
         }
         return 0;
