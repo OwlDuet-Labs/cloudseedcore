@@ -31,6 +31,16 @@ THE SOFTWARE.
 
 namespace Cloudseed
 {
+	// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-02>
+	// Crossfeed mode enumeration for internal state management
+	enum class CrossfeedMode
+	{
+		Disabled = 0,    // Baseline CloudSeed behavior (default)
+		EarlyOnly = 1,   // Early reflections crossfeed only
+		LateOnly = 2,    // Late diffusion crossfeed only
+		Both = 3         // Both early and late crossfeed (full mode)
+	};
+
 	class ReverbController
 	{
 	private:
@@ -40,10 +50,28 @@ namespace Cloudseed
 		ReverbChannel channelR;
 		double parameters[(int)Parameter::COUNT] = {0};
 
+		// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-02>
+		// Phase 2: Crossfeed mode state (infrastructure only, no DSP implementation yet)
+		CrossfeedMode crossfeedMode_;
+
+		// Crossfeed buffer coordination (Phase 2: pointers only, buffer sharing in Phase 3)
+		// These pointers allow ReverbController to coordinate buffer exchange between L/R channels
+		float* leftEarlyOutputBuffer_;
+		float* rightEarlyOutputBuffer_;
+		float* leftLateOutputBuffer_;
+		float* rightLateOutputBuffer_;
+		int crossfeedBufferSize_;
+
 	public:
 		ReverbController(int samplerate) :
 			channelL(samplerate, ChannelLR::Left),
-			channelR(samplerate, ChannelLR::Right)
+			channelR(samplerate, ChannelLR::Right),
+			crossfeedMode_(CrossfeedMode::Disabled),  // Default: crossfeed disabled (baseline behavior)
+			leftEarlyOutputBuffer_(nullptr),
+			rightEarlyOutputBuffer_(nullptr),
+			leftLateOutputBuffer_(nullptr),
+			rightLateOutputBuffer_(nullptr),
+			crossfeedBufferSize_(0)
 		{
 			this->samplerate = samplerate;
 		}
@@ -76,12 +104,58 @@ namespace Cloudseed
 			auto scaled = ScaleParam(value, paramId);
 			channelL.SetParameter(paramId, scaled);
 			channelR.SetParameter(paramId, scaled);
+
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-02>
+			// Update crossfeed mode when CrossfeedEnabled parameter changes
+			if (paramId == Parameter::CrossfeedEnabled)
+			{
+				// Phase 2: Simple mode flag update (no DSP implementation yet)
+				// Mode determined by CrossfeedEnabled parameter (off vs on)
+				// Future phases will implement EarlyOnly/LateOnly/Both modes
+				bool enabled = (scaled >= 0.5);
+				SetCrossfeedMode(enabled ? CrossfeedMode::Both : CrossfeedMode::Disabled);
+			}
 		}
 
+		// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-impl-01>
+		// Phase 2: Safe mode switching infrastructure
+		// Clears buffers to prevent stale reverb tails when switching modes
+		void SetCrossfeedMode(CrossfeedMode newMode)
+		{
+			if (crossfeedMode_ == newMode)
+				return;  // No change needed
+
+			// Clear internal state to prevent artifacts (addresses Bug #1 from previous attempts)
+			// This ensures no stale reverb tails bleed through during mode transitions
+			ClearBuffers();
+
+			// Update mode flag
+			crossfeedMode_ = newMode;
+
+			// Note: Crossfeed amount ramping handled by CloudSeed's existing parameter
+			// interpolation system (no additional smoothing needed)
+		}
+
+		// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-02>
+		// Query current crossfeed mode
+		CrossfeedMode GetCrossfeedMode() const
+		{
+			return crossfeedMode_;
+		}
+
+		// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-feature-01>
+		// Phase 2: Enhanced buffer clearing for mode transitions
 		void ClearBuffers()
 		{
 			channelL.ClearBuffers();
 			channelR.ClearBuffers();
+
+			// Clear crossfeed buffer references (Phase 2: pointers only, no data allocated yet)
+			// Phase 3 will manage actual buffer data
+			leftEarlyOutputBuffer_ = nullptr;
+			rightEarlyOutputBuffer_ = nullptr;
+			leftLateOutputBuffer_ = nullptr;
+			rightLateOutputBuffer_ = nullptr;
 		}
 
 		void Process(float* inL, float* inR, float* outL, float* outR, int bufSize)
@@ -119,8 +193,55 @@ namespace Cloudseed
 				rightChannelIn[i] = inR[i] * cmi + inL[i] * cm;
 			}
 
-			channelL.Process(leftChannelIn, outL, bufSize);
-			channelR.Process(rightChannelIn, outR, bufSize);
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-impl-02>
+			// ADC-IMPLEMENTS: <reverbv1-crossfeed-topology-algo-03>
+			// Phase 3: Crossfeed buffer coordination based on mode
+
+			if (crossfeedMode_ == CrossfeedMode::Disabled)
+			{
+				// Baseline mode: Independent L/R processing with no crossfeed
+				channelL.Process(leftChannelIn, outL, bufSize);
+				channelR.Process(rightChannelIn, outR, bufSize);
+			}
+			else
+			{
+				// Crossfeed mode: Set up buffer sharing before processing
+				// Configure which crossfeed stages are enabled based on mode
+				bool earlyEnabled = (crossfeedMode_ == CrossfeedMode::EarlyOnly ||
+				                     crossfeedMode_ == CrossfeedMode::Both);
+				bool lateEnabled = (crossfeedMode_ == CrossfeedMode::LateOnly ||
+				                    crossfeedMode_ == CrossfeedMode::Both);
+
+				channelL.SetEarlyCrossfeedEnabled(earlyEnabled);
+				channelL.SetLateCrossfeedEnabled(lateEnabled);
+				channelR.SetEarlyCrossfeedEnabled(earlyEnabled);
+				channelR.SetLateCrossfeedEnabled(lateEnabled);
+
+				// CRITICAL: Set up crossfeed input buffers BEFORE processing
+				// Each channel reads from the opposite channel's PREVIOUS block outputs
+				// This creates the 1-block delay inherent in the feedback loop
+				channelL.SetCrossfeedBuffers(
+					channelR.GetEarlyOutputBuffer(),  // L reads R's previous early output
+					channelR.GetLateOutputBuffer(),   // L reads R's previous late output (feedback)
+					bufSize
+				);
+				channelR.SetCrossfeedBuffers(
+					channelL.GetEarlyOutputBuffer(),  // R reads L's previous early output
+					channelL.GetLateOutputBuffer(),   // R reads L's previous late output (feedback)
+					bufSize
+				);
+
+				// Process channels with crossfeed enabled
+				// Each channel will:
+				// 1. Mix early reflections from opposite channel (early crossfeed)
+				// 2. Inject damped late feedback from opposite channel before late diffusion
+				// 3. Store early/late outputs for opposite channel's NEXT block
+				channelL.Process(leftChannelIn, outL, bufSize);
+				channelR.Process(rightChannelIn, outR, bufSize);
+
+				// Note: Buffer outputs are automatically stored in ReverbChannel::Process()
+				// for use in the next processing block (feedback loop continuity)
+			}
 		}
 	};
 }

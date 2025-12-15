@@ -82,7 +82,26 @@ namespace Cloudseed
         const int SeedDelay = 43;
         const int SeedPostDiffusion = 44;
 
-        const int COUNT = 45;
+        // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
+        // Crossfeed extension parameters (v1.1: 7 parameters, v1.2: 4 additional)
+        // Phase 2: Infrastructure only - defaults maintain baseline CloudSeed behavior
+        // Phase 3: Frequency-dependent damping filters (v1.1)
+        // Phase 3.2: Gain staging (v1.2)
+        const int CrossfeedEnabled = 45;         // 0.0=off, 1.0=on (mode flag)
+        const int EarlyCrossfeedAmount = 46;     // 0.0 to 1.0 (early reflection crossfeed)
+        const int LateCrossfeedAmount = 47;      // 0.0 to 1.0 (late diffusion crossfeed)
+        const int CrossfeedDamping = 48;         // 0.7 to 0.95 (late feedback stability)
+        const int CrossfeedLowpassCutoff = 49;   // 1000-8000 Hz (frequency-dependent damping)
+        const int CrossfeedHighpassCutoff = 50;  // 20-100 Hz (DC blocking)
+        const int CrossfeedFilterEnabled = 51;   // 0.0=off, 1.0=on (enable filter chain)
+
+        // v1.2 Stability Parameters
+        const int GainStaging = 52;              // -30.0 to 0.0 dB (default -4.1, loop energy reduction)
+        // NOTE: ParameterLimitingEnabled (53) is DEPRECATED but kept for backward compatibility
+        // Production limits are now compile-time only via #ifdef REVERB_V1_EXPERIMENTAL_BUILD
+        const int ParameterLimitingEnabled = 53; // DEPRECATED: 0.0=off, 1.0=on (kept for preset compat)
+
+        const int COUNT = 54;  // 45 CloudSeed + 8 crossfeed + 1 deprecated (kept for backward compat)
     };
 
     extern const char* ParameterLabel[Parameter::COUNT];
@@ -130,12 +149,12 @@ namespace Cloudseed
         case Parameter::TapPredelay:
             return Utils::Resp1dec(val) * 500;
         case Parameter::TapLength:
-            return 10 + val * 990;
+            return 1 + val * 999;  // Range: 1-1000 ms
 
         case Parameter::EarlyDiffuseCount:
             return (int)(1 + val * 11.999);
         case Parameter::EarlyDiffuseDelay:
-            return 10 + val * 90;
+            return 1 + val * 99;  // Range: 1-100 ms
         case Parameter::EarlyDiffuseModAmount:
             return val * 2.5;
         case Parameter::EarlyDiffuseModRate:
@@ -172,6 +191,31 @@ namespace Cloudseed
             return -20 + val * 20;
         case Parameter::EqHighGain:
             return -20 + val * 20;
+
+        // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
+        // Crossfeed parameter scaling (v1.1 + v1.2)
+        case Parameter::CrossfeedEnabled:
+            return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on
+        case Parameter::EarlyCrossfeedAmount:
+            return val;  // 0.0 to 1.0, default 0.5 (50%)
+        case Parameter::LateCrossfeedAmount:
+            return val;  // 0.0 to 1.0, default 0.3 (30%)
+        case Parameter::CrossfeedDamping:
+            return val;  // 0.0 to 1.0 (direct passthrough, range handled by JUCE param)
+        case Parameter::CrossfeedLowpassCutoff:
+            return 1000 + val * 7000;  // 1000-8000 Hz, default 3000 Hz (val=0.286)
+        case Parameter::CrossfeedHighpassCutoff:
+            return 20 + val * 80;  // 20-100 Hz, default 40 Hz (val=0.25)
+        case Parameter::CrossfeedFilterEnabled:
+            return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default on)
+
+        // v1.2 Stability Parameters
+        case Parameter::GainStaging:
+            return -30.0 + val * 30.0;  // -30.0 to 0.0 dB (full range, limiting handled by JUCE param)
+        case Parameter::ParameterLimitingEnabled:
+            // NOTE: This parameter is deprecated. Production limits are now compile-time only.
+            // Kept for backward compatibility with older presets/sessions
+            return val < 0.5 ? 0.0 : 1.0;  // Boolean: off/on (default off)
         }
         return 0;
     }
@@ -274,6 +318,31 @@ namespace Cloudseed
 
         case Parameter::EqLowGain:
         case Parameter::EqHighGain:
+            snprintf(buffer, MAX_STR_SIZE, "%.1f dB", s);
+            break;
+
+        // ADC-IMPLEMENTS: <reverbv1-crossfeed-statemgmt-datamodel-01>
+        // Crossfeed parameter formatting (v1.1 + v1.2)
+        case Parameter::CrossfeedEnabled:
+        case Parameter::CrossfeedFilterEnabled:
+        case Parameter::ParameterLimitingEnabled:
+            if (s == 1)
+                strcpy_s(buffer, MAX_STR_SIZE, "ENABLED");
+            else
+                strcpy_s(buffer, MAX_STR_SIZE, "DISABLED");
+            break;
+        case Parameter::EarlyCrossfeedAmount:
+        case Parameter::LateCrossfeedAmount:
+            snprintf(buffer, MAX_STR_SIZE, "%d%%", (int)(s * 100));
+            break;
+        case Parameter::CrossfeedDamping:
+            snprintf(buffer, MAX_STR_SIZE, "%.2f", s);
+            break;
+        case Parameter::CrossfeedLowpassCutoff:
+        case Parameter::CrossfeedHighpassCutoff:
+            snprintf(buffer, MAX_STR_SIZE, "%d Hz", (int)s);
+            break;
+        case Parameter::GainStaging:
             snprintf(buffer, MAX_STR_SIZE, "%.1f dB", s);
             break;
 
